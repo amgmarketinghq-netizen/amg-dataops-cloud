@@ -1,12 +1,11 @@
 import sys
 import os
 
-# Streamlit Cloud path fix
+# Streamlit Cloud path resolution
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 import streamlit as st
 import pandas as pd
-from backend.pipeline import run_dataops_pipeline
 
 st.set_page_config(
     page_title="AMG DataOps Cloud",
@@ -14,7 +13,14 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom Styling
+# Safe Dynamic Import to catch redacted errors
+try:
+    from backend.pipeline import run_dataops_pipeline
+except Exception as e:
+    st.error(f"❌ Engine Import Error Details: {str(e)}")
+    st.info("💡 Yeh error kisi missing library ya module path ki wajah se hai.")
+    st.stop()
+
 st.markdown("""
     <style>
     .main { background-color: #080C14; }
@@ -27,7 +33,6 @@ st.caption("Production-Ready Zero-Trust Data Cleaning, Deduplication & Threat In
 
 st.divider()
 
-# File Upload Section
 uploaded_file = st.file_uploader("📁 Drag and drop your CSV file here", type=["csv"])
 
 if uploaded_file is not None:
@@ -38,7 +43,7 @@ if uploaded_file is not None:
     if st.button("🚀 Process Batch Through 9 Engines", type="primary"):
         raw_records = df.to_dict(orient="records")
         
-        with st.spinner("Processing through 9 Engines (Syntax ➔ Dedup ➔ MX Probe ➔ Phone E.164 ➔ Risk Score ➔ Rules ➔ Anti-Ban ➔ Audit)..."):
+        with st.spinner("Processing through 9 Engines..."):
             result = run_dataops_pipeline(
                 raw_records=raw_records,
                 tenant_id="tenant_amg_default"
@@ -47,18 +52,15 @@ if uploaded_file is not None:
         if result.get("status") == "SUCCESS":
             st.success("✅ Batch Processed Successfully!")
             
-            # Metrics Display
             m1, m2, m3 = st.columns(3)
             m1.metric("Total Records Input", result["deduplication_summary"]["total_input"])
             m2.metric("Duplicates Removed", result["deduplication_summary"]["duplicates_removed"])
             m3.metric("Clean Records Output", len(result["records"]))
 
-            # Cleaned Data Table
             clean_df = pd.DataFrame(result["records"])
             st.subheader("✨ Processed Clean Records")
             st.dataframe(clean_df, use_container_width=True)
 
-            # Download CSV Button
             csv_data = clean_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Download Clean CSV Data",
