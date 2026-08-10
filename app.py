@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Streamlit Cloud path fix
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 import streamlit as st
 import pandas as pd
 from backend.pipeline import run_dataops_pipeline
