@@ -5,3 +5,6 @@ uvicorn
 pydantic
 python-dotenv
 requests
+phonenumbers
+dnspython
+unidecode
