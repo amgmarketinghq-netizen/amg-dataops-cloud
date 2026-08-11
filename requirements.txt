@@ -1,10 +1,5 @@
-streamlit
-pandas
 fastapi
 uvicorn
 pydantic
-python-dotenv
-requests
 phonenumbers
 dnspython
-unidecode
