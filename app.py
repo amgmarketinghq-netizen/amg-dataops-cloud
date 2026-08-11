@@ -1,25 +1,18 @@
 import sys
 import os
 
-# Fix Python path for Streamlit Cloud to find backend/engines
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-BACKEND_DIR = os.path.join(BASE_DIR, "backend")
-if BACKEND_DIR not in sys.path:
-    sys.path.append(BACKEND_DIR)
+# Add root and backend directory to Python path
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "backend")))
 
 import streamlit as st
 import json
 import pandas as pd
 
 # Import Engines cleanly
-try:
-    from engines.engine_12_admin_gateway import run_engine_12
-    from engines.engine_13_paywall import run_engine_13
-    from engines.engine_14_bi_dashboard import run_engine_14
-except ModuleNotFoundError:
-    from backend.engines.engine_12_admin_gateway import run_engine_12
-    from backend.engines.engine_13_paywall import run_engine_13
-    from backend.engines.engine_14_bi_dashboard import run_engine_14
+from backend.engines.engine_12_admin_gateway import run_engine_12
+from backend.engines.engine_13_paywall import run_engine_13
+from backend.engines.engine_14_bi_dashboard import run_engine_14
 
 st.set_page_config(page_title="AMG DataOps Cloud — Interactive Workbench", layout="wide")
 
