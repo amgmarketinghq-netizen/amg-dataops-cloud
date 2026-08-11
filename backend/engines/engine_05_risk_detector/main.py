@@ -345,16 +345,15 @@ def run_engine_05(records: List[Dict[str, Any]], tenant_id: str = "default_tenan
     for idx, rec in enumerate(records):
         rec_id = str(rec.get("id") or f"rec_{idx}")
         
-        # Extract email domain if not directly provided
-        email = rec.get("email", "")
-        email_domain = rec.get("email_domain") or (email.split("@")[1] if "@" in email else None)
+        # Safely extract email domain
+        raw_email = str(rec.get("email") or "")
+        email_domain = rec.get("email_domain") or (raw_email.split("@")[1] if "@" in raw_email else None)
         
-        # Check phone dummy tags from Engine 04
         phone_tags = rec.get("phone_tags", [])
         is_dummy_phone = "DUMMY_SEQUENCE" in phone_tags or "REPEATING_DIGITS" in phone_tags
         is_voip = rec.get("phone_line_type") == "LINE_VOIP" or "LINE_VOIP" in phone_tags
 
-        contact_name = f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip() or rec.get("name") or rec.get("contact_name")
+        contact_name = str(f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip() or rec.get("name") or rec.get("contact_name") or "")
 
         try:
             risk_input = RiskInput(
@@ -365,7 +364,7 @@ def run_engine_05(records: List[Dict[str, Any]], tenant_id: str = "default_tenan
                 is_catch_all_domain=bool(rec.get("is_catch_all", False)),
                 is_voip_phone=is_voip,
                 is_dummy_phone_pattern=is_dummy_phone,
-                company_name=rec.get("company"),
+                company_name=str(rec.get("company") or ""),
                 contact_name=contact_name,
             )
             result = compute_risk_score(risk_input)
