@@ -45,12 +45,15 @@ VALID_ACTION_TYPES = frozenset({
 })
 
 PII_ELIGIBLE_FIELDS: frozenset[str] = frozenset({
-    "email", "phone", "contact_name", "first_name", "last_name", "address",
+    "email", "phone", "contact_name", "first_name", "last_name", "address", "name",
 })
 
+# Fully synced metadata fields from Engines 01 to 07
 SAFE_METADATA_FIELDS: frozenset[str] = frozenset({
-    "sector", "risk_score", "is_disposable_email", "is_role_based_email",
-    "is_voip_phone", "is_catch_all_domain", "line_type", "country_code",
+    "sector", "industry_sector", "sector_confidence", "risk_score", "risk_tags",
+    "is_disposable", "is_role_based", "is_catch_all", "has_mx_records", "is_duplicate",
+    "is_disposable_email", "is_role_based_email", "is_voip_phone", "is_catch_all_domain",
+    "line_type", "phone_line_type", "country_code", "phone_country_code", "routed_queue"
 })
 
 
