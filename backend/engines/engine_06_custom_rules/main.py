@@ -35,11 +35,15 @@ MAX_SUBJECT_STRING_LEN = 1000
 MAX_QUANTIFIERS_IN_PATTERN = 4
 REGEX_TIMEOUT_SECONDS = 1
 
+# Synced with Engine 01 through Engine 05 outputs
 ALLOWED_RECORD_FIELDS: frozenset[str] = frozenset({
-    "email", "email_domain", "phone", "phone_national", "company_name",
-    "contact_name", "first_name", "last_name", "address", "sector",
-    "risk_score", "line_type", "is_disposable_email", "is_role_based_email",
-    "is_voip_phone", "is_catch_all_domain", "country_code", "company", "name",
+    "email", "email_domain", "phone", "phone_e164", "phone_country_code",
+    "phone_line_type", "phone_national", "company_name", "company",
+    "contact_name", "name", "first_name", "last_name", "address", "sector",
+    "industry_sector", "sector_confidence", "risk_score", "line_type",
+    "is_disposable", "is_role_based", "is_catch_all", "has_mx_records",
+    "is_duplicate", "is_disposable_email", "is_role_based_email",
+    "is_voip_phone", "is_catch_all_domain", "country_code"
 })
 
 ALLOWED_MASK_FIELDS = ALLOWED_RECORD_FIELDS
@@ -184,7 +188,7 @@ def _safe_regex_match(pattern: str, subject: str) -> Optional[bool]:
     finally:
         if use_alarm:
             signal.alarm(0)
-            if old_handler is not None:
+            if old_handler is not None and use_alarm:
                 signal.signal(signal.SIGALRM, old_handler)
 
 
