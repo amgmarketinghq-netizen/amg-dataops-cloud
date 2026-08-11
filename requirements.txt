@@ -1,0 +1,8 @@
+streamlit
+pandas
+openpyxl
+fastapi
+uvicorn
+pydantic
+phonenumbers
+dnspython
