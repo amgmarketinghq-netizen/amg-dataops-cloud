@@ -18,7 +18,7 @@ import hashlib
 import os
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Iterable, Iterator, List, Dict, Any
+from typing import Optional, Iterable, List, Dict, Any
 
 logger = logging.getLogger("engine02")
 
@@ -29,7 +29,7 @@ logger = logging.getLogger("engine02")
 
 MAX_STRING_LEN_FOR_MATCHING = 200     # caps fuzzy/phonetic algorithm cost
 MAX_BLOCK_SIZE = 500                  # hard cap on records compared pairwise
-MAX_EDIT_DISTANCE = 3                 # bounded Levenshtein threshold
+MAX_EDIT_DISTANCE = 3                  # bounded Levenshtein threshold
 FUZZY_MATCH_THRESHOLD = 0.90          # Jaro-Winkler similarity cutoff
 
 
@@ -95,16 +95,14 @@ def build_fingerprints(
 
 
 def find_exact_duplicates(
-    ctx: TenantHashContext,
     fingerprints: Iterable[RecordFingerprints],
 ) -> dict[str, list[str]]:
+    """Groups record_ids by matching email HMAC fingerprints."""
     email_buckets: dict[str, list[str]] = {}
     for fp_record in fingerprints:
         if fp_record.email_fp is None:
             continue
         bucket = email_buckets.setdefault(fp_record.email_fp, [])
-        if bucket and not ctx.constant_time_equal(bucket[0], fp_record.email_fp):
-            continue
         bucket.append(fp_record.record_id)
 
     return {fp: ids for fp, ids in email_buckets.items() if len(ids) > 1}
@@ -258,73 +256,7 @@ def find_fuzzy_duplicates_within_block(block: list[BlockingCandidate]) -> list[t
 
 
 # =========================================================================
-# 6. MASTER RECORD MERGE
-# =========================================================================
-
-@dataclass(frozen=True)
-class MergeableRecord:
-    record_id: str
-    fields: dict
-    source_priority: int = 0
-
-
-@dataclass(frozen=True)
-class MergeResult:
-    master_record_id: str
-    merged_fields: dict
-    field_sources: dict
-    conflicts: list
-
-
-def merge_duplicate_records(records: list[MergeableRecord]) -> MergeResult:
-    if not records:
-        raise MalformedRecordError("merge_duplicate_records requires at least one record")
-
-    records_sorted = sorted(records, key=lambda r: r.source_priority, reverse=True)
-    master_id = records_sorted[0].record_id
-
-    all_field_names = set()
-    for r in records:
-        all_field_names.update(r.fields.keys())
-
-    merged_fields = {}
-    field_sources = {}
-    conflicts = []
-
-    for field_name in all_field_names:
-        candidates = [
-            (r.record_id, r.source_priority, r.fields.get(field_name))
-            for r in records_sorted
-            if r.fields.get(field_name)
-        ]
-        if not candidates:
-            continue
-
-        candidates.sort(key=lambda c: (c[1], len(str(c[2]))), reverse=True)
-        winner_id, _, winner_value = candidates[0]
-
-        merged_fields[field_name] = winner_value
-        field_sources[field_name] = winner_id
-
-        distinct_values = {str(c[2]) for c in candidates}
-        if len(distinct_values) > 1:
-            conflicts.append({
-                "field": field_name,
-                "chosen_value": winner_value,
-                "chosen_from": winner_id,
-                "alternatives": [c[2] for c in candidates[1:]],
-            })
-
-    return MergeResult(
-        master_record_id=master_id,
-        merged_fields=merged_fields,
-        field_sources=field_sources,
-        conflicts=conflicts,
-    )
-
-
-# =========================================================================
-# PIPELINE ADAPTER WRAPPER
+# 6. PIPELINE ADAPTER WRAPPER
 # =========================================================================
 
 def run_engine_02(
@@ -334,7 +266,7 @@ def run_engine_02(
 ) -> List[Dict[str, Any]]:
     """
     Main Pipeline Wrapper for Engine 02.
-    Executes HMAC Fingerprinting, Exact Deduplication & Fuzzy Matching.
+    Executes HMAC Fingerprinting & Exact Deduplication.
     """
     if not server_pepper:
         raw_pepper = os.getenv("SERVER_PEPPER", "AMG_CLOUD_SECURE_PEPPER_KEY_32BYTES_LONG_MIN_SECRET")
@@ -350,7 +282,7 @@ def run_engine_02(
         email = rec.get("email") or None
         phone = rec.get("phone") or None
         
-        name = f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip() or rec.get("name") or ""
+        name = rec.get("name") or f"{rec.get('first_name', '')} {rec.get('last_name', '')}".strip() or ""
         company = rec.get("company") or ""
         comp_key = f"{name}:{company}".lower() if name or company else None
         
@@ -360,8 +292,8 @@ def run_engine_02(
         if name:
             candidates.append(BlockingCandidate(record_id=rec_id, name=name, company=company))
 
-    # Exact Duplicates
-    exact_dup_map = find_exact_duplicates(ctx, fps_list)
+    # Exact Duplicates Identification
+    exact_dup_map = find_exact_duplicates(fps_list)
     dup_ids = set()
     for ids in exact_dup_map.values():
         dup_ids.update(ids[1:]) # Mark secondary occurrences as duplicates
