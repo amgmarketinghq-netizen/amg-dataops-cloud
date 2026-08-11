@@ -1,99 +1,79 @@
 import os
-from fastapi import FastAPI, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
 
-load_dotenv()
-
-app = FastAPI(
-    title="AMG DataOps Cloud API",
-    version="1.0.0",
-    description="Enterprise Multi-Tenant Data Processing Engine"
-)
-
-# Enable CORS for Next.js Frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class BatchRequest(BaseModel):
-    records: List[Dict[str, Any]]
-    rules: Optional[List[Dict[str, Any]]] = []
-
-@app.get("/health")
-@app.get("/api/health")
-def health_check():
-    return {
-        "status": "HEALTHY",
-        "system": "AMG DataOps Cloud 9-Engine Pipeline",
-        "engines": [
-            "engine_01_syntax",
-            "engine_02_dedup",
-            "engine_03_smtp_verify",
-            "engine_04_phone_norm",
-            "engine_05_risk_detector",
-            "engine_06_custom_rules",
-            "engine_07_antiban_guard",
-            "engine_08_export_paywall",
-            "engine_09_audit_compliance"
-        ]
-    }
-
-@app.post("/api/v1/process-batch")
-def process_batch(
-    request: BatchRequest,
-    x_tenant_id: Optional[str] = Header("tenant_amg_default", alias="X-Tenant-ID")
-):
-    if not request.records:
-        return {
-            "clean_records": [],
-            "dlq": [],
-            "report": {"total": 0, "clean": 0, "status": "EMPTY_BATCH"}
-        }
-
+# Multi-environment fallback imports matching exact engine filenames
+try:
+    from engines.engine_09_orchestrator import run_pipeline_orchestrator, PipelineConfig
+    from engines.engine_07_throttling import TenantBucketRegistry
+    from engines.engine_10_crm_export import run_engine_10, ExportConfig
+    from engines.engine_11_metering import run_engine_11
+except ImportError:
     try:
-        # Pipeline Execution Summary
-        total_records = len(request.records)
-        clean_records = []
-        dlq_records = []
+        from backend.engines.engine_09_orchestrator import run_pipeline_orchestrator, PipelineConfig
+        from backend.engines.engine_07_throttling import TenantBucketRegistry
+        from backend.engines.engine_10_crm_export import run_engine_10, ExportConfig
+        from backend.engines.engine_11_metering import run_engine_11
+    except ImportError:
+        from .engines.engine_09_orchestrator import run_pipeline_orchestrator, PipelineConfig
+        from .engines.engine_07_throttling import TenantBucketRegistry
+        from .engines.engine_10_crm_export import run_engine_10, ExportConfig
+        from .engines.engine_11_metering import run_engine_11
 
-        for idx, record in enumerate(request.records):
-            # Basic Pipeline Sanitization Check
-            email = record.get("email", "").strip().lower()
-            phone = record.get("phone", "").strip()
+app = FastAPI(title="AMG DataOps Cloud API", version="1.0.0")
 
-            if email and "@" in email:
-                clean_records.append({
-                    "id": idx + 1,
-                    "email": email,
-                    "phone": phone,
-                    "status": "VALIDATED",
-                    "risk_score": 10
-                })
-            else:
-                dlq_records.append({
-                    "record_id": idx + 1,
-                    "stage": "ENGINE_01_SYNTAX",
-                    "error": "INVALID_EMAIL_FORMAT",
-                    "raw_data": record
-                })
+# Shared In-Memory Bucket Registry
+bucket_registry = TenantBucketRegistry()
+
+class DataProcessRequest(BaseModel):
+    tenant_id: str = "default_tenant"
+    records: List[Dict[str, Any]]
+    tenant_rules: Optional[List[Dict[str, Any]]] = []
+    default_phone_region: Optional[str] = "IN"
+    do_smtp_probe: Optional[bool] = False
+    export_target: Optional[str] = "CSV_DOWNLOAD"
+
+@app.get("/")
+def health_check():
+    return {"status": "online", "service": "AMG DataOps Cloud API v1.0"}
+
+@app.post("/api/v1/process")
+def process_batch(payload: DataProcessRequest):
+    try:
+        # 1. Billing & Credit Check (Engine 11)
+        billing_res = run_engine_11(records_count=len(payload.records), tenant_id=payload.tenant_id)
+        if not billing_res.get("billing_approved"):
+            raise HTTPException(status_code=402, detail="Insufficient API credits for this tenant.")
+
+        # 2. Main 9-Engine Processing Pipeline Execution
+        raw_pepper = os.getenv("SERVER_PEPPER", "AMG_CLOUD_SECURE_PEPPER_KEY_32BYTES_LONG_MIN_SECRET")
+        server_pepper = raw_pepper.encode("utf-8")[:32].ljust(32, b"0")
+
+        config = PipelineConfig(
+            server_pepper=server_pepper,
+            bucket_registry=bucket_registry,
+            tenant_rules=payload.tenant_rules or [],
+            default_phone_region=payload.default_phone_region,
+            do_smtp_probe=payload.do_smtp_probe
+        )
+
+        pipeline_result = run_pipeline_orchestrator(
+            records=payload.records,
+            tenant_id=payload.tenant_id,
+            config=config
+        )
+
+        # 3. CRM & Webhook Export Formatting (Engine 10)
+        export_config = ExportConfig(target=payload.export_target or "CSV_DOWNLOAD")
+        export_res = run_engine_10(records=pipeline_result.clean_records, tenant_id=payload.tenant_id, export_config=export_config)
 
         return {
-            "clean_records": clean_records,
-            "dlq": dlq_records,
-            "report": {
-                "total_records": total_records,
-                "clean_count": len(clean_records),
-                "dlq_count": len(dlq_records),
-                "tenant_id": x_tenant_id,
-                "status": "SUCCESS"
-            }
+            "status": "success",
+            "clean_records": export_res.get("formatted_payload"),
+            "report": pipeline_result.report,
+            "billing_summary": billing_res,
+            "dlq_count": len(pipeline_result.dlq)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline Orchestration Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
