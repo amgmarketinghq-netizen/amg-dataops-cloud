@@ -23,9 +23,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
-# --- Imports of Engines 01 to 08 ---
+# --- Imports of Engines 01 to 08 with robust fallbacks ---
 try:
-    from . import engine_01_normalization as E01
+    from . import engine_01_cleaning as E01
+except ImportError:
+    try:
+        import engine_01_cleaning as E01
+    except ImportError:
+        import engine_01_normalization as E01
+
+try:
     from . import engine_02_dedup as E02
     from . import engine_03_verification as E03
     from . import engine_04_phone as E04
@@ -34,7 +41,6 @@ try:
     from . import engine_07_throttling as E07
     from . import engine_08_compliance as E08
 except ImportError:
-    import engine_01_normalization as E01
     import engine_02_dedup as E02
     import engine_03_verification as E03
     import engine_04_phone as E04
@@ -143,6 +149,8 @@ def _stage_normalize(raw_record: dict, tenant_ctx: E01.TenantContext, tenant_id:
             "last_name": normalized.parsed_name.last_name or None,
             "address": normalized.address or None,
             "company_name": normalized.company or None,
+            "company": normalized.company or None,
+            "bio": normalized.bio or None,
         }
         return RecordEnvelope(record_id, PipelineStatus.NORMALIZED, working, tuple(normalized.errors)), None
     except Exception as e:
@@ -162,7 +170,8 @@ def _stage_dedup(envelopes: list, tenant_id: str, server_pepper: bytes) -> tuple
             )
             for env in envelopes
         ]
-        dupe_groups = E02.find_exact_duplicates(hash_ctx, fingerprints)
+        # Fixed: find_exact_duplicates takes 1 positional argument (fingerprints)
+        dupe_groups = E02.find_exact_duplicates(fingerprints)
         duplicate_ids = set()
         for ids in dupe_groups.values():
             duplicate_ids.update(ids[1:])
@@ -181,12 +190,8 @@ def _stage_dedup(envelopes: list, tenant_id: str, server_pepper: bytes) -> tuple
 
 def _stage_verify(envelopes: list, tenant_id: str, do_smtp_probe: bool) -> tuple:
     try:
-        input_records = [{"record_id": e.record_id, "email": e.data.get("email")} for e in envelopes]
-        
-        try:
-            results = asyncio.run(E03.verify_single_email(input_records, tenant_id)) if hasattr(E03, "verify_single_email") else E03.run_engine_03(input_records, tenant_id, do_smtp_probe)
-        except Exception:
-            results = E03.run_engine_03(input_records, tenant_id, do_smtp_probe)
+        input_records = [{"id": e.record_id, "email": e.data.get("email")} for e in envelopes]
+        results = E03.run_engine_03(input_records, tenant_id, do_smtp_probe)
 
         surviving = []
         for idx, env in enumerate(envelopes):
@@ -196,6 +201,7 @@ def _stage_verify(envelopes: list, tenant_id: str, do_smtp_probe: bool) -> tuple
                 "is_disposable_email": res_dict.get("is_disposable", False),
                 "is_role_based_email": res_dict.get("is_role_based", False),
                 "is_catch_all_domain": bool(res_dict.get("is_catch_all", False)),
+                "has_mx_records": res_dict.get("has_mx_records", True),
                 "email_valid_syntax": res_dict.get("has_mx_records", True),
             }
             surviving.append(RecordEnvelope(env.record_id, PipelineStatus.VERIFIED, new_data, env.tags))
@@ -254,7 +260,7 @@ def _stage_score(envelopes: list, tenant_id: str) -> tuple:
         surviving = []
         for env in envelopes:
             r = result_by_id.get(env.record_id, {})
-            new_data = {**env.data, "risk_score": r.get("risk_score", 50), "sector": r.get("industry_sector", "Unknown")}
+            new_data = {**env.data, "risk_score": r.get("risk_score", 50), "sector": r.get("industry_sector", "Unknown"), "industry_sector": r.get("industry_sector", "Unknown")}
             surviving.append(RecordEnvelope(env.record_id, PipelineStatus.SCORED, new_data, env.tags))
         return surviving, []
     except Exception as e:
